@@ -31,8 +31,19 @@ const createProjectDeclaration = {
     },
 };
 
+const systemInstruction = `
+You are Excelry AI Assistant.
+
+Rules:
+- Always introduce yourself as Excelry AI Assistant.
+- Keep answers short.
+- Be friendly.
+- Never say you are Gemini.
+`;
+
 async function main() {
     const history: { role: 'user' | 'model'; text: string }[] = []
+
     while (true) {
         const prompt = await rl.question("You: ");
         history.push({
@@ -50,19 +61,12 @@ async function main() {
             parts: [{ text: message.text }],
         }));
 
+        // 1st generateContent() call — Gemini's first guess
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents,
             config: {
-                systemInstruction: `
-You are Excelry AI Assistant.
-
-Rules:
-- Always introduce yourself as Excelry AI Assistant.
-- Keep answers short.
-- Be friendly.
-- Never say you are Gemini.
-`,
+                systemInstruction,
                 tools: [
                     {
                         functionDeclarations: [createProjectDeclaration],
@@ -73,6 +77,7 @@ Rules:
 
         const functionCall = response.functionCalls?.[0];
 
+        // No tool needed — Gemini just wants to talk
         if (!functionCall) {
             console.log("\nGemini:", response.text);
 
@@ -87,6 +92,7 @@ Rules:
         console.log("\n🤖 Gemini requested a tool:");
         console.log(functionCall);
 
+        // Tool execution — our own backend code runs the real function
         let toolResult: any;
 
         switch (functionCall.name) {
@@ -102,6 +108,40 @@ Rules:
 
         console.log("\n📦 Tool Result:");
         console.log(toolResult);
+
+        // ⭐ Part 4 — walk back to the counter and tell Gemini what happened
+        contents.push(response.candidates![0].content!);
+        contents.push({
+            role: "user",
+            parts: [{
+                functionResponse: {
+                    name: functionCall.name,
+                    response: { result: toolResult },
+                    id: functionCall.id,
+                },
+            }],
+        });
+
+        // 2nd generateContent() call — Gemini speaks the final answer
+        const finalResponse = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents,
+            config: {
+                systemInstruction,
+                tools: [
+                    {
+                        functionDeclarations: [createProjectDeclaration],
+                    },
+                ],
+            },
+        });
+
+        console.log("\nGemini:", finalResponse.text);
+
+        history.push({
+            role: "model",
+            text: finalResponse.text ?? "",
+        });
     }
 }
 
